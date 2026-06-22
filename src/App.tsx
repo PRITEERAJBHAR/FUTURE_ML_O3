@@ -34,6 +34,14 @@ import RankingsTable from "./components/RankingsTable";
 import SkillGapView from "./components/SkillGapView";
 import SettingsView from "./components/SettingsView";
 import CandidateModal from "./components/CandidateModal";
+import { 
+  getLocalJobs, 
+  saveLocalJobs, 
+  getLocalCandidates, 
+  saveLocalCandidates, 
+  getLocalSettings, 
+  saveLocalSettings 
+} from "./lib/clientDb";
 
 type ActiveTab = "dashboard" | "jobs" | "upload_resume" | "candidate_ranking" | "skill_gap" | "settings";
 
@@ -69,41 +77,84 @@ export default function App() {
   // Load system state on start
   const fetchAllData = async () => {
     setLoading(true);
+    let loadedSettings = null;
+    let loadedJobs = null;
+    let loadedCandidates = null;
+
     try {
       // Fetch settings
       const setRes = await fetch("/api/settings");
       if (setRes.ok) {
-        const setData = await setRes.json();
-        setSettings(setData);
-        setDarkMode(setData.theme === "dark");
+        loadedSettings = await setRes.json();
       }
 
       // Fetch active jobs
       const jobsRes = await fetch("/api/jobs");
       if (jobsRes.ok) {
-        const jobsData = await jobsRes.json();
-        setJobs(jobsData);
-        if (jobsData.length > 0) {
-          setActiveJobId(jobsData[0].id);
-        }
+        loadedJobs = await jobsRes.json();
       }
 
       // Fetch candidates
       const candRes = await fetch("/api/candidates");
       if (candRes.ok) {
-        const candData = await candRes.json();
-        setCandidates(candData);
+        loadedCandidates = await candRes.json();
       }
     } catch (e) {
-      console.error("Failed to boot full-stack system database matrices", e);
-    } finally {
-      setLoading(false);
+      console.warn("Failed to talk to full-stack Express API, turning on robust client-side storage mode.", e);
     }
+
+    // Apply fallbacks
+    if (loadedSettings) {
+      setSettings(loadedSettings);
+      setDarkMode(loadedSettings.theme === "dark");
+    } else {
+      const localSettings = getLocalSettings();
+      setSettings(localSettings);
+      setDarkMode(localSettings.theme === "dark");
+    }
+
+    if (loadedJobs && loadedJobs.length > 0) {
+      setJobs(loadedJobs);
+      if (!activeJobId) {
+        setActiveJobId(loadedJobs[0].id);
+      }
+    } else {
+      const localJobs = getLocalJobs();
+      setJobs(localJobs);
+      if (localJobs.length > 0 && !activeJobId) {
+        setActiveJobId(localJobs[0].id);
+      }
+    }
+
+    if (loadedCandidates && loadedCandidates.length > 0) {
+      setCandidates(loadedCandidates);
+    } else {
+      setCandidates(getLocalCandidates());
+    }
+
+    setLoading(false);
   };
 
   useEffect(() => {
     fetchAllData();
   }, []);
+
+  // Sync to LocalStorage whenever state changes
+  useEffect(() => {
+    if (jobs.length > 0) {
+      saveLocalJobs(jobs);
+    }
+  }, [jobs]);
+
+  useEffect(() => {
+    if (candidates.length > 0) {
+      saveLocalCandidates(candidates);
+    }
+  }, [candidates]);
+
+  useEffect(() => {
+    saveLocalSettings(settings);
+  }, [settings]);
 
   // Sync index.html body classes for Dark Mode
   useEffect(() => {
