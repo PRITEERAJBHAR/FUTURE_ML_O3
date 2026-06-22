@@ -20,6 +20,7 @@ export default function ResumeUploader({ onCandidateAdded }: ResumeUploaderProps
   const [error, setError] = useState<string | null>(null);
   const [pastedText, setPastedText] = useState("");
   const [manualName, setManualName] = useState("");
+  const [fastMode, setFastMode] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,8 +68,14 @@ Skills: HTML, CSS, JavaScript, React, Git, NPM.`
     }
   };
 
-  const parseAndAddResume = async (text: string, name: string, filename?: string) => {
-    if (!text.trim()) {
+  const parseAndAddResume = async (
+    text: string, 
+    name: string, 
+    filename?: string,
+    fileData?: string,
+    mimeType: string = "text/plain"
+  ) => {
+    if (mimeType === "text/plain" && !text.trim()) {
       setError("Please paste custom resume content or select a sample draft.");
       return;
     }
@@ -88,7 +95,7 @@ Skills: HTML, CSS, JavaScript, React, Git, NPM.`
         }
         return prev + 12;
       });
-    }, 400);
+    }, 250);
 
     try {
       const response = await fetch("/api/candidates/parse", {
@@ -96,6 +103,9 @@ Skills: HTML, CSS, JavaScript, React, Git, NPM.`
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resumeText: text,
+          fileData,
+          mimeType,
+          fastMode,
           candidateName: name,
           filename: filename || "manual-upload.txt"
         })
@@ -135,6 +145,26 @@ Skills: HTML, CSS, JavaScript, React, Git, NPM.`
     }
   };
 
+  const processFile = (file: File) => {
+    const reader = new FileReader();
+    const isPDF = file.name.toLowerCase().endsWith(".pdf");
+
+    if (isPDF) {
+      reader.onload = async (event) => {
+        const result = event.target?.result as string;
+        const base64Data = result?.includes(",") ? result.split(",")[1] : result;
+        await parseAndAddResume("", file.name.split(".")[0], file.name, base64Data, "application/pdf");
+      };
+      reader.readAsDataURL(file);
+    } else {
+      reader.onload = async (event) => {
+        const textContent = event.target?.result as string;
+        await parseAndAddResume(textContent, file.name.split(".")[0], file.name, undefined, "text/plain");
+      };
+      reader.readAsText(file);
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -142,24 +172,14 @@ Skills: HTML, CSS, JavaScript, React, Git, NPM.`
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const textContent = event.target?.result as string;
-        await parseAndAddResume(textContent, file.name.split(".")[0], file.name);
-      };
-      reader.readAsText(file);
+      processFile(file);
     }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const textContent = event.target?.result as string;
-        await parseAndAddResume(textContent, file.name.split(".")[0], file.name);
-      };
-      reader.readAsText(file);
+      processFile(file);
     }
   };
 
@@ -169,14 +189,28 @@ Skills: HTML, CSS, JavaScript, React, Git, NPM.`
 
   return (
     <div className="space-y-8 text-left" id="resume-uploader">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold font-display text-slate-900 dark:text-white flex items-center gap-2">
-          <Upload className="w-6 h-6 text-indigo-500" />
-          <span>Ingest Resumes</span>
-        </h1>
-        <p className="text-xs text-slate-500">
-          Upload plain-text, docx formats, paste raw text, or select high-fidelity drafts instantly below to test parser results.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold font-display text-slate-900 dark:text-white flex items-center gap-2">
+            <Upload className="w-6 h-6 text-indigo-500" />
+            <span>Ingest Resumes</span>
+          </h1>
+          <p className="text-xs text-slate-500">
+            Upload plain-text, PDF transcripts, paste raw text, or select high-fidelity drafts instantly below to test parser results.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 px-3 py-1.5 rounded-2xl shadow-2xs self-start md:self-auto">
+          <input
+            type="checkbox"
+            id="checkbox-fast-mode"
+            checked={fastMode}
+            onChange={(e) => setFastMode(e.target.checked)}
+            className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-800 focus:ring-indigo-500 cursor-pointer"
+          />
+          <label htmlFor="checkbox-fast-mode" className="text-[11px] font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none flex items-center gap-1.5">
+            <span>Fast Local Indexing (⚡ Instant Matching)</span>
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

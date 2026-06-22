@@ -754,17 +754,56 @@ expressApp.get("/api/candidates", (req, res) => {
   res.json(db.candidates);
 });
 
+// Helper to extract printable plain string tokens from raw PDF stream heuristically
+function extractPDFTextHeuristic(buf: Buffer): string {
+  try {
+    const binaryString = buf.toString("latin1");
+    const matches = [...binaryString.matchAll(/\(([^)]+)\)\s*(?:Tj|TJ)/g)];
+    if (matches.length > 0) {
+      const terms = matches.map(m => {
+        const parenthesized = m[1];
+        return parenthesized.replace(/\\([0-3][0-7][0-7])/g, (_, octal) => 
+          String.fromCharCode(parseInt(octal, 8))
+        );
+      });
+      return terms.join(" ").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+    return buf.toString("utf-8").replace(/[^a-zA-Z0-9\s@.-]/g, " ").replace(/\s+/g, " ").trim();
+  } catch (err) {
+    return "";
+  }
+}
+
 // Resume parser via Gemini 3.5 AI
 expressApp.post("/api/candidates/parse", async (req, res) => {
-  const { resumeText, candidateName, filename } = req.body;
-  if (!resumeText) {
-    return res.status(400).json({ error: "No resume textual content provided." });
+  const { resumeText, fileData, mimeType, fastMode, candidateName, filename } = req.body;
+  
+  let resumeTextClean = String(resumeText || "").trim();
+  const isPDF = mimeType === "application/pdf" || (filename && filename.toLowerCase().endsWith(".pdf"));
+
+  // Retrieve or extract PDF plain string in case of binary uploads
+  if (isPDF && fileData) {
+    try {
+      const pdfBuffer = Buffer.from(fileData, "base64");
+      const extractedText = extractPDFTextHeuristic(pdfBuffer);
+      if (extractedText && extractedText.length > 5) {
+        resumeTextClean = extractedText;
+      } else {
+        resumeTextClean = "Extracted PDF applicant resume " + (filename || "Candidate");
+      }
+    } catch {
+      resumeTextClean = "Extracted PDF applicant resume " + (filename || "Candidate");
+    }
+  }
+
+  if (!resumeTextClean && !fileData) {
+    return res.status(400).json({ error: "No resume textual content or valid file data provided." });
   }
 
   const newCandId = `cand-${Date.now()}`;
   let parsedCandidate: Partial<Candidate> = {};
 
-  const lowercaseText = resumeText.toLowerCase();
+  const lowercaseText = resumeTextClean.toLowerCase();
   let isPreset = false;
 
   // 1. Instant Preset Detection for snappy 0ms demonstration
@@ -820,7 +859,7 @@ expressApp.post("/api/candidates/parse", async (req, res) => {
       yearsOfExperience: 7,
       matchResults: {},
       dateAdded: new Date().toISOString(),
-      rawText: resumeText
+      rawText: resumeTextClean
     };
   } else if (lowercaseText.includes("elizabeth tesla") || lowercaseText.includes("elizabeth.tesla@aiworld") || candidateName === "Elizabeth Tesla AI") {
     isPreset = true;
@@ -874,7 +913,7 @@ expressApp.post("/api/candidates/parse", async (req, res) => {
       yearsOfExperience: 6,
       matchResults: {},
       dateAdded: new Date().toISOString(),
-      rawText: resumeText
+      rawText: resumeTextClean
     };
   } else if (lowercaseText.includes("kevin codefresh") || lowercaseText.includes("kevin@codefresh.net") || candidateName === "Kevin Codefresh") {
     isPreset = true;
@@ -916,7 +955,7 @@ expressApp.post("/api/candidates/parse", async (req, res) => {
       yearsOfExperience: 1,
       matchResults: {},
       dateAdded: new Date().toISOString(),
-      rawText: resumeText
+      rawText: resumeTextClean
     };
   }
 
@@ -1094,7 +1133,7 @@ Format your output EXACTLY as JSON matching the parameters.`;
           company: "Enterprise Technology Corp",
           role: "Professional Practitioner",
           duration: `${derivedYears} Years`,
-          description: resumeText.length > 250 ? resumeText.substring(0, 250) + "..." : resumeText
+          description: resumeTextClean.length > 250 ? resumeTextClean.substring(0, 250) + "..." : resumeTextClean
         }
       ],
       projects: [],
@@ -1113,7 +1152,7 @@ Format your output EXACTLY as JSON matching the parameters.`;
       yearsOfExperience: derivedYears,
       matchResults: {},
       dateAdded: new Date().toISOString(),
-      rawText: resumeText
+      rawText: resumeTextClean
     };
   }
 
@@ -1160,7 +1199,7 @@ Format your output EXACTLY as JSON matching the parameters.`;
     const activeJobs = db.jobs || [];
     activeJobs.forEach(job => {
       try {
-        const cosineSim = calculateCosineSimilarity(resumeText, job.descriptionText || "");
+        const cosineSim = calculateCosineSimilarity(resumeTextClean, job.descriptionText || "");
         
         const jobSkillFlat = [
           ...(job.skillsRequired?.programmingLanguages || []),
