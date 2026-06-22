@@ -1,0 +1,6 @@
+{
+  "name": "AI Resume Candidate Screening System",
+  "description": "Automatically analyze, score, and rank resumes using Artificial Intelligence with comprehensive skill gap analysis, ATS candidate ranking, and job matching.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
